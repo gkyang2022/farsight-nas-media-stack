@@ -106,7 +106,7 @@ jellyfin_compose=$(cat <<EOL
 version: "3.5"
 services:
   jellyfin:
-    image: nyanmisaka/jellyfin
+    image: linuxserver/jellyfin
     container_name: jellyfin
     user: $PUID:$PGID
     ports:
