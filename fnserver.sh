@@ -1,268 +1,203 @@
 #!/bin/bash
 
 #====================================================
-# 腳本名稱：Eric 的媒體服務器一鍵部署腳本
-# 腳本作者：Eric
-# YouTube 頻道：https://www.youtube.com/@Eric-f2v
-#
-# 描述：本腳本將在飛牛 NAS 上自動部署一套完整的
-#       媒體服務器堆棧，包括 Jellyfin、Jellyseerr、
-#       Jackett、qBittorrent、Sonarr、Radarr 和 Bazarr。
-#
-# ---------------------------------------------------
-# 執行前請確保已安裝 Docker 和 Docker Compose。
+# 脚本名称：Eric 的媒体服务器一键部署脚本 (优化版)
+# 适用环境：飞牛 NAS (FnOS) 或 标准 Debian/Ubuntu
 #====================================================
 
-echo "========================================="
-echo "飞牛媒体服务一键部署脚本"
-echo "YouTube 頻道：https://www.youtube.com/@Eric-f2v"
-echo "========================================="
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
 
+echo -e "${GREEN}=========================================${NC}"
+echo "  飞牛媒体服务一键部署脚本"
+echo "  YouTube 頻道：https://www.youtube.com/@Eric-f2v"
+echo -e "${GREEN}=========================================${NC}"
 
-# 定義基礎目錄
+# 1. 基础路径配置
 BASE_DIR="/vol1/1000"
-
-# 定義子目錄
 DOCKER_DIR="$BASE_DIR/docker"
 MEDIA_DIR="$BASE_DIR/media"
 
-# 確保腳本以 root 權限執行
+# 确保以 root 执行
 if [ "$EUID" -ne 0 ]; then
-  echo "--- 錯誤：請使用 root 權限執行此腳本 ---"
-  echo "請輸入：sudo ./fnserver.sh"
+  echo -e "${RED}错误：请使用 root 权限执行此脚本 (sudo ./fnserver.sh)${NC}"
   exit 1
 fi
 
-echo "--- 正在建立所需的目錄結構 ---"
-# 建立基礎目錄
-mkdir -p "$DOCKER_DIR/jellyfin/config"
-mkdir -p "$DOCKER_DIR/jellyseerr/config"
-mkdir -p "$DOCKER_DIR/jackett/config"
-mkdir -p "$DOCKER_DIR/qbittorrent/config"
-mkdir -p "$DOCKER_DIR/sonarr/config"
-mkdir -p "$DOCKER_DIR/radarr/config"
-mkdir -p "$DOCKER_DIR/bazarr/config"
-mkdir -p "$MEDIA_DIR/downloads"
-mkdir -p "$MEDIA_DIR/movie"
-mkdir -p "$MEDIA_DIR/tv"
+echo "--- 正在建立所需的目录结构 ---"
+mkdir -p "$DOCKER_DIR"/{jellyfin,jellyseerr,jackett,qbittorrent,sonarr,radarr,bazarr}/config
+mkdir -p "$MEDIA_DIR"/{downloads,movie,tv}
+echo "✅ 目录建立完成！"
 
-echo "✅ 目錄建立完成！"
+# 2. 获取用户 ID
+echo -e "\n--- 获取 PUID 和 PGID ---"
+read -p "请输入 PUID (默认 1000): " PUID
+PUID=${PUID:-1000}
+read -p "请输入 PGID (默认 1001): " PGID
+PGID=${PGID:-1001}
+TZ="Asia/Shanghai"
 
-# 互動式輸入 PUID 和 PGID，並設定默認值
-echo -e "\n--- 獲取 PUID 和 PGID ---"
-echo "你可以透過在終端機運行 'id' 或 'id <你的用戶名>' 命令來獲取。"
-echo "如果你不確定，直接按 Enter 將使用默認值 (PUID: 1000, PGID: 1001)。"
-
-read -p "請輸入 PUID (默認 1000): " PUID
-# 驗證輸入，如果為空則使用默認值，否則檢查是否為數字
-if [ -z "$PUID" ]; then
-    PUID=1000
-else
-    while ! [[ "$PUID" =~ ^[0-9]+$ ]]
-    do
-      read -p "PUID 必須是數字，請重新輸入: " PUID
-    done
-fi
-
-read -p "請輸入 PGID (默認 1001): " PGID
-# 驗證輸入，如果為空則使用默認值，否則檢查是否為數字
-if [ -z "$PGID" ]; then
-    PGID=1001
-else
-    while ! [[ "$PGID" =~ ^[0-9]+$ ]]
-    do
-      read -p "PGID 必須是數字，請重新輸入: " PGID
-    done
-fi
-
-echo "選定的 PUID: $PUID, PGID: $PGID"
-echo "--- 開始依序建立 Docker Compose 檔案並啟動容器 ---"
-
-# 函數：建立並啟動 Docker Compose
+# 3. 部署函数
 deploy_app() {
   local app_name=$1
   local compose_content=$2
-  local compose_file="$DOCKER_DIR/$app_name/docker-compose.yml"
+  local app_path="$DOCKER_DIR/$app_name"
 
-  echo -e "\n-----------------------------------------------------"
-  echo "🛠️ 正在建立 **$app_name** 的 Docker Compose 檔案..."
-  echo "$compose_content" > "$compose_file"
-
-  echo "🚀 正在啟動 **$app_name** 容器..."
-  cd "$DOCKER_DIR/$app_name"
+  echo -e "\n🛠️  正在部署: $app_name"
+  echo "$compose_content" > "$app_path/docker-compose.yml"
+  
+  cd "$app_path"
   docker compose up -d
   
   if [ $? -eq 0 ]; then
-    echo "✅ $app_name 啟動成功！"
+    echo -e "${GREEN}✅ $app_name 启动成功！${NC}"
   else
-    echo "❌ 警告：$app_name 啟動失敗，請檢查日誌。"
+    echo -e "${RED}❌ $app_name 启动失败，请检查 docker-compose.yml${NC}"
   fi
-  
   cd - > /dev/null
 }
 
-# Jellyfin 的 compose 檔案內容 (已變更映像檔)
-jellyfin_compose=$(cat <<EOL
-version: "3.5"
+# --- 各应用配置开始 ---
+
+# Jellyfin (含硬解支持)
+jellyfin_compose="version: '3.5'
 services:
   jellyfin:
-    image: linuxserver/jellyfin
+    image: lscr.io/linuxserver/jellyfin:latest
     container_name: jellyfin
-    user: $PUID:$PGID
-    ports:
-      - "8096:8096"
-    volumes:
-      - "$DOCKER_DIR/jellyfin/config:/config"
-      - "$MEDIA_DIR/movie:/movie"
-      - "$MEDIA_DIR/tv:/tv"
-    restart: "unless-stopped"
+    network_mode: host
     environment:
       - PUID=$PUID
       - PGID=$PGID
-      - TZ=Asia/Taipei
-EOL
-)
-deploy_app "jellyfin" "$jellyfin_compose"
+      - TZ=$TZ
+    volumes:
+      - $DOCKER_DIR/jellyfin/config:/config
+      - $MEDIA_DIR:/media
+    devices:
+      - /dev/dri:/dev/dri # 显卡硬解
+    restart: unless-stopped"
 
-# Jellyseerr 的 compose 檔案內容
-jellyseerr_compose=$(cat <<EOL
-version: "3.5"
+# Jellyseerr
+jellyseerr_compose="version: '3.5'
 services:
   jellyseerr:
-    image: fallenbagel/jellyseerr
+    image: lscr.io/fallenbagel/jellyseerr:latest
     container_name: jellyseerr
-    volumes:
-      - "$DOCKER_DIR/jellyseerr/config:/app/config"
     ports:
-      - "5055:5055"
-    restart: "unless-stopped"
+      - 5055:5055
     environment:
+      - TZ=$TZ
       - LOG_LEVEL=debug
-      - TZ=Asia/Taipei
-EOL
-)
-deploy_app "jellyseerr" "$jellyseerr_compose"
+    volumes:
+      - $DOCKER_DIR/jellyseerr/config:/app/config
+    restart: unless-stopped"
 
-# Jackett 的 compose 檔案內容
-jackett_compose=$(cat <<EOL
-version: "3.5"
+# Jackett
+jackett_compose="version: '3.5'
 services:
   jackett:
-    image: lscr.io/linuxserver/jackett
+    image: lscr.io/linuxserver/jackett:latest
     container_name: jackett
-    volumes:
-      - "$DOCKER_DIR/jackett/config:/config"
-      - "$MEDIA_DIR/downloads:/downloads"
     ports:
-      - "9117:9117"
-    restart: "unless-stopped"
+      - 9117:9117
     environment:
       - PUID=$PUID
       - PGID=$PGID
-      - TZ=Asia/Taipei
-EOL
-)
-deploy_app "jackett" "$jackett_compose"
+      - TZ=$TZ
+    volumes:
+      - $DOCKER_DIR/jackett/config:/config
+      - $MEDIA_DIR/downloads:/downloads
+    restart: unless-stopped"
 
-# qBittorrent 的 compose 檔案內容
-qbittorrent_compose=$(cat <<EOL
-version: "3.5"
+# qBittorrent
+qbittorrent_compose="version: '3.5'
 services:
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent
+    image: lscr.io/linuxserver/qbittorrent:latest
     container_name: qbittorrent
-    volumes:
-      - "$DOCKER_DIR/qbittorrent/config:/config"
-      - "$MEDIA_DIR/downloads:/downloads"
-      - "$MEDIA_DIR:/media"
     ports:
-      - "6881:6881"
-      - "6881:6881/udp"
-      - "8080:8080"
-    restart: "unless-stopped"
+      - 8080:8080
+      - 6881:6881
+      - 6881:6881/udp
     environment:
       - PUID=$PUID
       - PGID=$PGID
-      - TZ=Asia/Taipei
-EOL
-)
-deploy_app "qbittorrent" "$qbittorrent_compose"
+      - TZ=$TZ
+      - WEBUI_PORT=8080
+    volumes:
+      - $DOCKER_DIR/qbittorrent/config:/config
+      - $MEDIA_DIR:/media
+    restart: unless-stopped"
 
-# Sonarr 的 compose 檔案內容
-sonarr_compose=$(cat <<EOL
-version: "3.5"
+# Sonarr
+sonarr_compose="version: '3.5'
 services:
   sonarr:
-    image: lscr.io/linuxserver/sonarr
+    image: lscr.io/linuxserver/sonarr:latest
     container_name: sonarr
-    volumes:
-      - "$DOCKER_DIR/sonarr/config:/config"
-      - "$MEDIA_DIR/tv:/tv"
-      - "$MEDIA_DIR/downloads:/downloads"
     ports:
-      - "8989:8989"
-    restart: "unless-stopped"
+      - 8989:8989
     environment:
       - PUID=$PUID
       - PGID=$PGID
-      - TZ=Asia/Taipei
-EOL
-)
-deploy_app "sonarr" "$sonarr_compose"
+      - TZ=$TZ
+    volumes:
+      - $DOCKER_DIR/sonarr/config:/config
+      - $MEDIA_DIR:/media
+    restart: unless-stopped"
 
-# Radarr 的 compose 檔案內容
-radarr_compose=$(cat <<EOL
-version: "3.5"
+# Radarr
+radarr_compose="version: '3.5'
 services:
   radarr:
-    image: lscr.io/linuxserver/radarr
+    image: lscr.io/linuxserver/radarr:latest
     container_name: radarr
-    volumes:
-      - "$DOCKER_DIR/radarr/config:/config"
-      - "$MEDIA_DIR/movie:/movie"
-      - "$MEDIA_DIR/downloads:/downloads"
     ports:
-      - "7878:7878"
-    restart: "unless-stopped"
+      - 7878:7878
     environment:
       - PUID=$PUID
       - PGID=$PGID
-      - TZ=Asia/Taipei
-EOL
-)
-deploy_app "radarr" "$radarr_compose"
+      - TZ=$TZ
+    volumes:
+      - $DOCKER_DIR/radarr/config:/config
+      - $MEDIA_DIR:/media
+    restart: unless-stopped"
 
-# Bazarr 的 compose 檔案內容
-bazarr_compose=$(cat <<EOL
-version: "3.5"
+# Bazarr
+bazarr_compose="version: '3.5'
 services:
   bazarr:
-    image: lscr.io/linuxserver/bazarr
+    image: lscr.io/linuxserver/bazarr:latest
     container_name: bazarr
-    volumes:
-      - "$DOCKER_DIR/bazarr/config:/config"
-      - "$MEDIA_DIR/movie:/movie"
-      - "$MEDIA_DIR/tv:/tv"
     ports:
-      - "6767:6767"
-    restart: "unless-stopped"
+      - 6767:6767
     environment:
       - PUID=$PUID
       - PGID=$PGID
-      - TZ=Asia/Taipei
-EOL
-)
+      - TZ=$TZ
+    volumes:
+      - $DOCKER_DIR/bazarr/config:/config
+      - $MEDIA_DIR:/media
+    restart: unless-stopped"
+
+# --- 执行部署序列 ---
+deploy_app "jellyfin" "$jellyfin_compose"
+deploy_app "jellyseerr" "$jellyseerr_compose"
+deploy_app "jackett" "$jackett_compose"
+deploy_app "qbittorrent" "$qbittorrent_compose"
+deploy_app "sonarr" "$sonarr_compose"
+deploy_app "radarr" "$radarr_compose"
 deploy_app "bazarr" "$bazarr_compose"
 
-echo -e "\n--- 🎉 所有應用程式部署並啟動完成！ 🎉 ---"
-echo "現在你可以透過 NAS 的 IP 和對應的埠號來存取每個應用的網頁介面。"
-echo "  - Jellyfin:     http://<NAS_IP>:8096"
-echo "  - Jellyseerr:   http://<NAS_IP>:5055"
-echo "  - Jackett:      http://<NAS_IP>:9117"
-echo "  - qBittorrent:  http://<NAS_IP>:8080"
-echo "  - Sonarr:       http://<NAS_IP>:8989"
-echo "  - Radarr:       http://<NAS_IP>:7878"
-echo "  - Bazarr:       http://<NAS_IP>:6767"
-
-echo -e "\n--- 感謝使用，祝你有個愉快的影音體驗！ ---"
-echo "📺 更多 NAS 教程，歡迎訂閱 Eric 的 YouTube 頻道：https://www.youtube.com/@Eric-f2v"
+echo -e "\n${GREEN}--- 🎉 所有应用程序部署完成！ ---${NC}"
+echo "请通过 NAS IP 加以下端口访问："
+echo "  - Jellyfin:    8096"
+echo "  - Jellyseerr:  5055"
+echo "  - qBittorrent: 8080"
+echo "  - Sonarr:      8989"
+echo "  - Radarr:      7878"
+echo "  - Jackett:     9117"
+echo "  - Bazarr:      6767"
+echo -e "\n${GREEN}温馨提示：在 Sonarr/Radarr 设置媒体库时，请统一使用 /media 路径以实现硬链接。${NC}"
