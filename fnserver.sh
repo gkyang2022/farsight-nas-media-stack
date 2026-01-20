@@ -83,7 +83,7 @@ services:
 jellyseerr_compose="version: '3.5'
 services:
   jellyseerr:
-    image: lscr.io/fallenbagel/jellyseerr:latest
+    image: fallenbagel/jellyseerr:latest
     container_name: jellyseerr
     ports:
       - 5055:5055
